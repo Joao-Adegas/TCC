@@ -1,6 +1,7 @@
 import os
 import re
 import fitz
+import json
 import requests
 
 from openai import OpenAI
@@ -14,12 +15,22 @@ from io import BytesIO
 load_dotenv()
 app = FastAPI()
 
-# NOME DA MINHA CHAVE: Teste
-# api_key = os.getenv("HF_TOKEN")
-# client = OpenAI(
-#     base_url="https://router.huggingface.co/v1",
-#     api_key=api_key
-# )
+"""
+ NOME DA MINHA CHAVE: Teste
+
+
+ api_key = os.getenv("HF_TOKEN")
+ client = OpenAI(
+     base_url="https://router.huggingface.co/v1",
+     api_key=api_key
+ )
+
+ USAR MODELO ->  mistralai/Mixtral-8x7B-Instruct-v0.1 
+
+
+"""
+
+
 
 proxies = {
     "http":"http://127.0.0.1:8080",
@@ -48,79 +59,113 @@ def extrair_texto_docx(arquivo):
     texto = "\n".join([par.text for par in doc.paragraphs])
     return texto
 
-def organizar_perguntas(texto):
-    pattern = r"\*\*Pergunta\s*\d+\*\*:\s*(.*)"  # --> Regex para pegar linhas que começam com número + ponto
-    perguntas = re.findall(pattern,texto)
+# def organizar_perguntas(texto):
+#     # Regex que aceita vários formatos de enumeração, com ou sem negrito
+#     pattern = r"(?:\*\*)?Pergunta\s*\d+(?:\*\*)?[:\-\)]\s*(.*?)(?=\n(?:\*\*)?Pergunta\s*\d+(?:\*\*)?[:\-\)]|$)"
+#     perguntas = re.findall(pattern, texto, flags=re.IGNORECASE | re.DOTALL)
+#     perguntas_enumeradas = {f"pergunta{i+1}": p.strip() for i, p in enumerate(perguntas)}
+#     return perguntas_enumeradas
+
+def organizar_perguntas_json(texto):
+    try:
+        return json.loads(texto)
+    except json.JSONDecodeError:
+        return {}
+
+def extrair_json_do_texto(texto):
+    # Regex para pegar o primeiro objeto JSON que aparece no texto
+    padrao = r"\{(?:[^{}]|(?R))*\}"
+    match = re.search(padrao, texto, re.DOTALL)
+    if match:
+        json_str = match.group(0)
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+def organizar_perguntas_num(texto_resposta):
+    perguntas = re.findall(r"\d+\.\s+(.*)", texto_resposta)
     perguntas_enumeradas = {f"pergunta{i+1}": p.strip() for i, p in enumerate(perguntas)}
     return perguntas_enumeradas
 
-# USAR MODELO ->  mistralai/Mixtral-8x7B-Instruct-v0.1 #
+def organizar_perguntas_num(texto_resposta):
+    perguntas = re.findall(r"\d+\.\s+(.*)", texto_resposta)
+    perguntas_enumeradas = {
+        f"pergunta{i+1}": p.strip().replace("\n", "\\n")
+        for i, p in enumerate(perguntas)
+    }
+    return perguntas_enumeradas
 
-# @app.post("/")
-# async def fazer_perguntas(prompt: str = Form(...),file: UploadFile = File(...)):
+"""
+@app.post("/")
+async def fazer_perguntas(prompt: str = Form(...),file: UploadFile = File(...)):
 
-#     if(file.filename.endswith(".pdf")):
-#         texto_extraido = extrair_texto_pdf(file)
-#     elif(file.filename.endswith(".md")):
-#         texto_extraido = extrair_texto_md(file)
-#     elif(file.filename.endswith(".docx")):
-#         texto_extraido = extrair_texto_docx(file)
-    
-#     print(f"Extraindo texto de {file.filename}")
+    if(file.filename.endswith(".pdf")):
+        texto_extraido = extrair_texto_pdf(file)
+    elif(file.filename.endswith(".md")):
+        texto_extraido = extrair_texto_md(file)
+    elif(file.filename.endswith(".docx")):
+        texto_extraido = extrair_texto_docx(file)
 
-#     data = {
-#         "model": "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
-#         "prompt": f"Crie perguntas deste texto: {texto_extraido}:\n\n",
-#         "temperature": 0.7
-#     }
+    print(f"Extraindo texto de {file.filename}")
 
-    # completion = client.chat.completions.create(
-    #     model="meta-llama/Llama-3.1-8B-Instruct:fireworks-ai",
-    #     messages=[
-    #         {
-    #             "role": "user",
-    #             "content":prompt_user
-    #         }
-    #     ],
-    # )
+    data = {
+        "model": "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+        "prompt": f"Crie perguntas deste texto: {texto_extraido}:\n\n",
+        "temperature": 0.7
+    }
 
-    # response = client.chat.completions.create(
-    #     model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
-    #     messages=[
-    #     {
-    #         "role": "user",
-    #         "content": prompt_user
+    completion = client.chat.completions.create(
+        model="meta-llama/Llama-3.1-8B-Instruct:fireworks-ai",
+        messages=[
+            {
+                "role": "user",
+                "content":prompt_user
+            }
+        ],
+    )
 
-    #     }
-    #     ]
-    # )
+    response = client.chat.completions.create(
+        model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+        messages=[
+        {
+            "role": "user",
+            "content": prompt_user
 
-    # response = requests.post(
-    #      "https://api.together.xyz/v1/completions",
-    #     headers={
-    #         "Authorization": f"Bearer {api_key}",
-    #         "Content-Type": "application/json"
-    #     },
-    #     json=data,
-    #     proxies=proxies
-    # )
+        }
+        ]
+    )
 
-    # response_json = response.json()
-    # print(response_json)
-    # texto = response_json.get("output","sem saida")
-    # perguntas_enumeradas = organizar_perguntas(texto)
-    # print("texto extraito: ", texto_extraido)
-    # print(perguntas_enumeradas)
+    response = requests.post(
+        "https://api.together.xyz/v1/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json=data,
+        proxies=proxies
+    )
 
-    # return JSONResponse(content={
-    #     "Prompt": f"{prompt}:\n", 
-    #     "Perguntas:\n":perguntas_enumeradas,
-    #     "Resposta completa": texto
-    #     })
+    response_json = response.json()
+    print(response_json)
+    texto = response_json.get("output","sem saida")
+    perguntas_enumeradas = organizar_perguntas(texto)
+    print("texto extraito: ", texto_extraido)
+    print(perguntas_enumeradas)
+
+    return JSONResponse(content={
+        "Prompt": f"{prompt}:\n", 
+        "Perguntas:\n":perguntas_enumeradas,
+        "Resposta completa": texto
+        })
+"""
+
+
 
 @app.post("/")
 async def fazer_perguntas(prompt: str = Form(...), file: UploadFile = File(...)):
-    # 1. Extrair texto conforme o tipo de arquivo
+    
     if file.filename.endswith(".pdf"):
         texto_extraido = extrair_texto_pdf(file)
     elif file.filename.endswith(".md"):
@@ -132,10 +177,25 @@ async def fazer_perguntas(prompt: str = Form(...), file: UploadFile = File(...))
 
     print(f"Extraindo texto de {file.filename}")
 
-    # 2. Criar prompt com base no texto extraído
-    prompt_final = f"{prompt}\n\n{texto_extraido}"
+    prompt_final = prompt_final = f"""
+        {prompt}
 
-    # 3. Preparar payload da API
+        Por favor, gere as perguntas sobre o texto abaixo. Formate cada pergunta assim:
+
+        {{
+        "pergunta1": "...",
+        "pergunta2": "...",
+        ...
+        }}
+
+
+        E assim por diante.
+
+        Texto:
+        {texto_extraido}
+    """
+
+
     data = {
         "model": "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
         "prompt": prompt_final,
@@ -143,7 +203,6 @@ async def fazer_perguntas(prompt: str = Form(...), file: UploadFile = File(...))
         "temperature": 0.7
     }
 
-    # 4. Enviar requisição à Together API
     response = requests.post(
         "https://api.together.xyz/v1/completions",
         headers={
@@ -157,18 +216,17 @@ async def fazer_perguntas(prompt: str = Form(...), file: UploadFile = File(...))
     response_json = response.json()
     print("Resposta da API:", response_json)
 
-    # 5. Pegar saída do modelo e organizar perguntas
     choices = response_json.get("choices", [])
     if choices and "text" in choices[0]:
         texto_modelo = choices[0]["text"]
     else:
         texto_modelo = "sem saída"
 
-    perguntas_enumeradas = organizar_perguntas(texto_modelo)
-
+    perguntas_enumeradas = organizar_perguntas_num(texto_modelo)
     # 6. Retornar como resposta
     return JSONResponse(content={
         "Prompt original": prompt,
         "Perguntas geradas": perguntas_enumeradas,
         "Texto completo da IA": texto_modelo
     })
+os.system("cls")
