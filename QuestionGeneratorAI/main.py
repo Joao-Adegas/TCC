@@ -97,6 +97,62 @@ def organizar_perguntas_num(texto_resposta):
     }
     return perguntas_enumeradas
 
+# def extrair_primeiro_json_valido(texto):
+#     padrao = r"\{(?:[^{}]|(?R))*\}"
+#     matches = re.findall(padrao, texto, re.DOTALL)
+    
+#     for match in matches:
+#         try:
+#             return json.loads(match)
+#         except json.JSONDecodeError:
+#             continue
+#     return {}
+
+def extrair_primeiro_json_valido(texto: str):
+    decoder = json.JSONDecoder()
+    i = 0
+    n = len(texto)
+    while i < n:
+        ch = texto[i]
+        if ch in '{[':
+            try:
+                obj, end = decoder.raw_decode(texto, i)
+                return obj  # retorna o primeiro JSON bem-formado
+            except json.JSONDecodeError:
+                pass
+        i += 1
+    return {}
+
+def normalizar_perguntas(obj):
+    if not isinstance(obj, dict):
+        return {}
+    saida = {}
+    for k, v in obj.items():
+        if isinstance(k, str) and k.lower().strip().startswith("pergunta"):
+            chave = re.sub(r"\s+", "", k.lower())  # "Pergunta 2" -> "pergunta2"
+            if isinstance(v, str):
+                saida[chave] = " ".join(v.split())  # normaliza espaços/linhas
+    return saida
+
+def extrair_perguntas_do_texto(texto: str):
+    # 1) tenta decodificar o primeiro JSON válido
+    obj = extrair_primeiro_json_valido(texto)
+    perguntas = normalizar_perguntas(obj)
+    if perguntas:
+        return perguntas
+
+    # 2) fallback: captura pares "perguntaN": "..."
+    # - ignora maiúsculas/minúsculas
+    # - DOTALL para capturar quebras de linha dentro das aspas
+    pairs = re.findall(r'"(pergunta\s*\d+)"\s*:\s*"(.*?)"', texto, flags=re.IGNORECASE | re.DOTALL)
+    if pairs:
+        saida = {}
+        for k, v in pairs:
+            chave = re.sub(r"\s+", "", k.lower())
+            saida[chave] = " ".join(v.split())
+        return saida
+
+    return {}
 """
 @app.post("/")
 async def fazer_perguntas(prompt: str = Form(...),file: UploadFile = File(...)):
@@ -189,8 +245,7 @@ async def fazer_perguntas(prompt: str = Form(...), file: UploadFile = File(...))
         }}
 
 
-        E assim por diante.
-
+        E assim por diante. Não coloque nada além das perguntas e não repita nenhuma pergunta.  
         Texto:
         {texto_extraido}
     """
@@ -210,10 +265,11 @@ async def fazer_perguntas(prompt: str = Form(...), file: UploadFile = File(...))
             "Content-Type": "application/json"
         },
         json=data,
-        proxies=proxies
+        # proxies=proxies
     )
 
     response_json = response.json()
+    os.system("cls")
     print("Resposta da API:", response_json)
 
     choices = response_json.get("choices", [])
@@ -222,11 +278,9 @@ async def fazer_perguntas(prompt: str = Form(...), file: UploadFile = File(...))
     else:
         texto_modelo = "sem saída"
 
-    perguntas_enumeradas = organizar_perguntas_num(texto_modelo)
+    perguntas_enumeradas = extrair_perguntas_do_texto(texto_modelo)
     # 6. Retornar como resposta
     return JSONResponse(content={
         "Prompt original": prompt,
-        "Perguntas geradas": perguntas_enumeradas,
-        "Texto completo da IA": texto_modelo
+        "Perguntas geradas": perguntas_enumeradas
     })
-os.system("cls")
